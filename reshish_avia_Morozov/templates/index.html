@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Решись Авиа — Прогноз спроса</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #f1f5f9; color: #0f172a; margin: 0; padding: 20px; }
+        .container { max-width: 960px; margin: 0 auto; }
+        header, .card { background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        header { display: flex; justify-content: space-between; align-items: center; }
+        header h1 { margin: 0; font-size: 20px; color: #2563eb; }
+        .grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px; }
+        @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+        .fg { margin-bottom: 14px; }
+        label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 5px; }
+        input, select { width: 100%; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; }
+        button { background: #2563eb; color: #fff; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+        button.sec { background: #e2e8f0; color: #0f172a; }
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+        .stat { background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center; }
+        .stat span { display: block; font-size: 12px; color: #64748b; }
+        .stat strong { font-size: 20px; color: #2563eb; }
+        .alert { padding: 10px; border-radius: 8px; margin-bottom: 14px; font-size: 14px; display: none; }
+        .alert.err { background: #fee2e2; color: #991b1b; display: block; }
+        .alert.warn { background: #fef3c7; color: #92400e; display: block; }
+        .hidden { display: none !important; }
+        .leg { display: flex; gap: 14px; justify-content: center; font-size: 12px; margin-top: 8px; color: #475569; }
+        .leg i { display: inline-block; width: 12px; height: 12px; vertical-align: middle; margin-right: 4px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>✈️ Решись Авиа — Прогноз спроса</h1>
+        <div id="ubar" class="hidden">
+            <span id="uname" style="margin-right:10px;font-weight:600;"></span>
+            <button type="button" class="sec" onclick="logout()">Выйти</button>
+        </div>
+    </header>
+
+    <div id="abox" class="card" style="max-width:400px;margin:40px auto;">
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+            <button type="button" id="tin" onclick="smode('login')" style="flex:1;">Вход</button>
+            <button type="button" id="treg" class="sec" onclick="smode('register')" style="flex:1;">Регистрация</button>
+        </div>
+        <div id="aerr" class="alert"></div>
+        <form onsubmit="auth(event)">
+            <div class="fg"><label>Логин (от 3 символов)</label><input id="uin" required></div>
+            <div class="fg"><label>Пароль (от 4 символов)</label><input id="pin" type="password" required></div>
+            <button type="submit" id="abtn" style="width:100%;">Войти</button>
+        </form>
+    </div>
+
+    <div id="mbox" class="hidden">
+        <div class="grid">
+            <div class="card">
+                <h2 style="margin-top:0;">Параметры рейса</h2>
+                <div id="cerr" class="alert"></div>
+                <form onsubmit="calc(event)">
+                    <div class="fg"><label>Откуда</label><input value="Москва (MOW)" disabled></div>
+                    <div class="fg">
+                        <label>Куда</label>
+                        <select id="rsel" onchange="hint()">
+                            {% for code, info in routes.items() %}
+                            <option value="{{ code }}" data-b="{{ info.base_price }}" data-min="{{ info.price_min }}" data-max="{{ info.price_max }}">{{ info.destination }} ({{ code }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="fg"><label>Дата вылета</label><input type="date" id="din" value="2026-06-15" min="2026-06-01" max="2026-07-01" required></div>
+                    <div class="fg">
+                        <label>Цена билета (₽)</label>
+                        <input type="number" id="prin" value="9000" min="100" step="100" required>
+                        <small id="phint" style="color:#64748b;"></small>
+                    </div>
+                    <button type="submit" style="width:100%;">Рассчитать спрос</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2 style="margin-top:0;">Прогноз (медиана)</h2>
+                <div id="rwait" style="color:#64748b;text-align:center;padding:40px 0;">Укажите параметры и нажмите «Рассчитать спрос»</div>
+                <div id="rok" class="hidden">
+                    <div class="stats">
+                        <div class="stat"><span>Мест (seats)</span><strong id="sseats">—</strong></div>
+                        <div class="stat"><span>Желают</span><strong id="sdem">—</strong></div>
+                        <div class="stat"><span>Купят</span><strong id="ssal" style="color:#10b981;">—</strong></div>
+                    </div>
+                    <div id="cap" class="alert warn">⚠️ Спрос выше числа мест! Продажи ограничены вместимостью.</div>
+                    <canvas id="ch" width="460" height="240" style="width:100%;height:auto;border:1px solid #f1f5f9;border-radius:8px;"></canvas>
+                    <div class="leg">
+                        <span><i style="background:#93c5fd;"></i>Желают</span>
+                        <span><i style="background:#10b981;"></i>Купят</span>
+                        <span><i style="background:#ef4444;height:3px;"></i>Места</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    let mode = 'login';
+    const el = id => document.getElementById(id);
+
+    async function check() {
+        const d = await (await fetch('/api/auth/status')).json();
+        el('abox').classList.toggle('hidden', d.authenticated);
+        el('mbox').classList.toggle('hidden', !d.authenticated);
+        el('ubar').classList.toggle('hidden', !d.authenticated);
+        if (d.authenticated) { el('uname').textContent = '👤 ' + d.username; hint(); }
+    }
+
+    function smode(m) {
+        mode = m; el('aerr').className = 'alert';
+        el('tin').className = m === 'login' ? '' : 'sec';
+        el('treg').className = m === 'register' ? '' : 'sec';
+        el('abtn').textContent = m === 'login' ? 'Войти' : 'Зарегистрироваться';
+    }
+
+    async function auth(e) {
+        e.preventDefault();
+        const r = await fetch(mode === 'login' ? '/api/auth/login' : '/api/auth/register', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username: el('uin').value, password: el('pin').value})
+        });
+        const d = await r.json();
+        if (r.ok) check(); else { el('aerr').textContent = d.error; el('aerr').className = 'alert err'; }
+    }
+
+    async function logout() { await fetch('/api/auth/logout', {method: 'POST'}); check(); }
+
+    function hint() {
+        const s = el('rsel');
+        const o = s.options.item(s.selectedIndex);
+        el('prin').value = o.dataset.b;
+        el('phint').textContent = `База: ${o.dataset.b} ₽ (${o.dataset.min}–${o.dataset.max} ₽)`;
+    }
+
+    function draw(d) {
+        const c = el('ch'), ctx = c.getContext('2d'), w = c.width, h = c.height;
+        ctx.clearRect(0, 0, w, h);
+        const pL = 40, pR = 15, pT = 22, pB = 26, pW = w - pL - pR, pH = h - pT - pB;
+        const maxV = Math.max(d.seats * 1.15, ...d.quantiles.map(q => q.raw_demand * 1.1));
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.beginPath(); ctx.moveTo(pL, pT); ctx.lineTo(pL, h - pB); ctx.lineTo(w - pR, h - pB); ctx.stroke();
+
+        const step = pW / d.quantiles.length, bW = step * 0.62;
+        d.quantiles.forEach((q, i) => {
+            const x = pL + i * step + (step - bW) / 2;
+            const hD = (Math.max(0, q.raw_demand) / maxV) * pH;
+            const hS = (Math.max(0, q.expected_sales) / maxV) * pH;
+            ctx.fillStyle = '#93c5fd'; ctx.fillRect(x, h - pB - hD, bW, hD);
+            ctx.fillStyle = '#10b981'; ctx.fillRect(x + bW * 0.15, h - pB - hS, bW * 0.7, hS);
+            ctx.fillStyle = '#334155'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(q.quantile, x + bW / 2, h - 9);
+            ctx.fillText(Math.round(q.raw_demand), x + bW / 2, h - pB - hD - 4);
+        });
+
+        const yS = h - pB - (d.seats / maxV) * pH;
+        ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(pL, yS); ctx.lineTo(w - pR, yS); ctx.stroke(); ctx.lineWidth = 1;
+        ctx.fillStyle = '#ef4444'; ctx.textAlign = 'left'; ctx.fillText('Места: ' + d.seats, pL + 6, yS - 5);
+    }
+
+    async function calc(e) {
+        e.preventDefault(); el('cerr').className = 'alert';
+        const r = await fetch('/api/predict', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({route: el('rsel').value, date: el('din').value, price: el('prin').value})
+        });
+        const d = await r.json();
+        if (!r.ok) { el('cerr').textContent = d.error; el('cerr').className = 'alert err'; return; }
+        el('rwait').classList.add('hidden'); el('rok').classList.remove('hidden');
+        el('sseats').textContent = d.seats;
+        el('sdem').textContent = d.raw_demand;
+        el('ssal').textContent = Math.round(d.expected_sales);
+        el('cap').style.display = d.is_capped ? 'block' : 'none';
+        draw(d);
+    }
+    check();
+</script>
+</body>
+</html>
+
